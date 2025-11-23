@@ -1,0 +1,42 @@
+# -------------------------
+# VERSIONES BASE
+# -------------------------
+python==3.10
+torch==2.1.2
+torchvision==0.16.2
+torchaudio==2.1.2
+
+# -------------------------
+# DEPENDENCIAS SLAM3R / MASt3R
+# -------------------------
+opencv-python==4.9.0.80
+open3d==0.17.0
+scipy==1.11.4
+numpy==1.26.4
+matplotlib==3.8.2
+tqdm==4.66.2
+h5py==3.10.0
+plyfile==1.0.3
+imageio==2.33.0
+pillow==10.1.0
+pyyaml==6.0.1
+
+# -------------------------
+# DEPENDENCIAS SPATIALLM
+# -------------------------
+einops==0.7.0
+tensorboard==2.16.2
+transformers==4.36.2
+accelerate==0.25.0
+scikit-image==0.22.0
+
+# spconv requiere torch==2.1.*
+# versión estable para SpatialLM
+spconv-cu118==2.3.6
+
+# -------------------------
+# UTILITARIOS
+# -------------------------
+protobuf==4.25.2
+rich==13.7.1
+plotly==5.18.0
