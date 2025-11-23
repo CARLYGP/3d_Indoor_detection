@@ -182,4 +182,5 @@ Los derechos corresponden a sus autores originales.
 
 ## Comentario final
 
-Este pipeline fue integrado y simplificado para ofrecer una experiencia completa de reconstrucción indoor 3D de extremo a extremo. 
+Este pipeline fue integrado y simplificado para ofrecer una experiencia completa de reconstrucción indoor 3D de extremo a extremo. Los resultados obtenidos se pueden visualizar en la siguiente presentación: https://www.canva.com/design/DAG5ZciTtM4/P0mjYXu9eZGRtm89qAWvcA/edit?utm_content=DAG5ZciTtM4&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton
+
