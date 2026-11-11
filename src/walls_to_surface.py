@@ -2,10 +2,8 @@
 import argparse, os, re
 import numpy as np
 import open3d as o3d
-import rerun as rr
-import rerun.blueprint as rrb
 
-from spatiallm import Layout
+# spatiallm y rerun solo hacen falta en el modo 'boxes' y con --view; se importan ahí.
 
 EPS = 1e-4
 
@@ -35,6 +33,7 @@ def parse_walls_from_txt(txt: str):
     return walls
 
 def boxes_from_layout_txt(txt: str):
+    from spatiallm import Layout
     layout = Layout(txt)
     return layout.to_boxes()
 
@@ -142,6 +141,7 @@ def merge_meshes(meshes):
     return out
 
 def log_mesh_rr(mesh: o3d.geometry.TriangleMesh, path: str, label="mesh"):
+    import rerun as rr
     verts = np.asarray(mesh.vertices, dtype=np.float32)
     tris  = np.asarray(mesh.triangles, dtype=np.uint32)
     rr.log(path, rr.Mesh3D(vertex_positions=verts, triangle_indices=tris))
@@ -231,6 +231,8 @@ def main():
         print(f"[OK] Envolvente convexa guardada en: {hull_path}")
 
     if args.view:
+        import rerun as rr
+        import rerun.blueprint as rrb
         blueprint = rrb.Blueprint(
             rrb.Spatial3DView(name="3D", origin="/world", background=[255,255,255]),
             collapse_panels=True,

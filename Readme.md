@@ -51,8 +51,14 @@ necesidad de calibrar la cámara. [`src/recon.py`](src/recon.py) es una versión
 <p align="center"><img src="docs/resultados/03_nube_alineada_pca.jpg" width="560" alt="Nube alineada con PCA"></p>
 
 SLAM3R entrega la nube en el sistema de coordenadas de la primera cámara, así que el piso suele quedar inclinado.
-[`src/resize.py`](src/resize.py) la centra, calcula los ejes principales (PCA sobre la covarianza) y la rota para que
-el piso quede horizontal y el eje Z apunte hacia arriba, que es lo que espera SpatialLM.
+[`src/resize.py`](src/resize.py) la deja como la espera SpatialLM:
+
+1. **PCA**: centra la nube y la rota con sus ejes principales, de modo que la dirección de menor varianza (la altura
+   de la sala) pasa a ser Z. Se cuida que sea una rotación y no un reflejo, que dejaría la sala en espejo.
+2. **Piso exacto**: PCA deja el eje vertical a unos grados del real (los muebles lo sesgan), así que se ajusta el
+   plano del piso con RANSAC y se gira la nube para que su normal quede exactamente en Z.
+3. **Escala y origen**: SLAM3R no entrega metros; la nube se escala a la altura de la sala (2,5 m por defecto,
+   `--altura`) y el piso queda en Z = 0.
 
 ## 3. Describir la sala con un LLM espacial (SpatialLM)
 
@@ -144,25 +150,49 @@ Las paredes y los muebles grandes (cama, sofá, mesa de centro) se detectan bien
 
 ## Cómo ejecutarlo
 
-Requiere GPU con CUDA (SpatialLM usa `spconv-cu118`).
+Requiere GPU NVIDIA con CUDA. SLAM3R y SpatialLM piden versiones de PyTorch distintas, así que cada uno va en su
+propio entorno; `main.py` los ejecuta como procesos aparte con el Python de cada entorno.
 
 ```bash
-conda create -n recon3d python=3.10 -y
-conda activate recon3d
-pip install -r requirements.txt
-
-# los dos modelos se clonan dentro del repositorio
+# 1. Los dos modelos se clonan dentro del repositorio
 git clone https://github.com/PKU-VCL-3DV/SLAM3R.git slam3r
 git clone https://github.com/manycore-research/SpatialLM.git spatiallm
-cp src/recon.py slam3r/recon.py        # versión modificada que exporta .ply
 
-python main.py --video ruta/del/video.mp4
+# 2. Un entorno por modelo, siguiendo el README de cada uno
+#    (SLAM3R: conda env "slam3r", PyTorch 2.5 · SpatialLM: conda env "spatiallm", PyTorch 2.4 + poetry install)
+
+# 3. El pipeline corre desde el entorno de SpatialLM, que ya trae open3d y rerun
+conda activate spatiallm
+pip install -r requirements.txt
+python main.py --video sala.mp4 --slam3r_python "$(conda run -n slam3r python -c 'import sys; print(sys.executable)')"
 ```
 
-Salida en `outputs/`: la nube de SLAM3R, la nube alineada, las detecciones de SpatialLM y la escena final.
+`main.py` instala por su cuenta [`src/recon.py`](src/recon.py) dentro de `slam3r/`: el `recon.py` original de
+SLAM3R solo acepta carpetas de imágenes y este acepta un video. El original queda guardado como `recon_original.py`.
 
-Si SLAM3R deja una nube demasiado densa o ruidosa, su interfaz Gradio (`python slam3r/app.py`) permite ajustar la
-resolución, la densidad de puntos y el submuestreo antes de seguir con el resto del pipeline.
+Salida en `outputs/`:
+
+| Archivo | Paso |
+|---|---|
+| `slam3r/escena/escena_online_recon.ply` | nube de SLAM3R |
+| `nube_alineada.ply` | nube enderezada y escalada |
+| `detections.txt` | paredes, puertas y objetos de SpatialLM |
+| `paredes.ply` | paredes como malla 3D |
+| `escena.rrd` | escena completa; se abre con `rerun outputs/escena.rrd` (o usa `--ver` para abrir el visor al final) |
+
+Opciones útiles:
+
+| Opción | Para qué |
+|---|---|
+| `--nube archivo.ply` | saltar SLAM3R y partir de una nube ya reconstruida |
+| `--altura 2.4` | altura real de la sala, para que la escala quede en metros |
+| `--invertir` | si la sala sale de cabeza (cámara sostenida al revés) |
+| `--modelo manycore-research/SpatialLM1.1-Llama-1B` | otro modelo de SpatialLM |
+| `--slam3r_args "--keyframe_stride 5"` | opciones extra para SLAM3R |
+
+El video tiene que ser `.mp4`: es el único formato que el lector de SLAM3R reconoce como video. Si SLAM3R deja una
+nube demasiado densa o ruidosa, su interfaz Gradio (`python slam3r/app.py`) permite ajustar la resolución y el
+submuestreo; luego se sigue con `python main.py --nube <esa nube>.ply`.
 
 Para regenerar el video y la portada:
 
@@ -181,7 +211,7 @@ npx remotion still PortadaBanner ../portada.png
 main.py                     orquesta el pipeline completo
 src/
   recon.py                  recon.py de SLAM3R modificado (exporta .ply, sin visor)
-  resize.py                 alineación PCA de la nube (Z hacia arriba)
+  resize.py                 alineación PCA + piso por RANSAC + escala (Z hacia arriba)
   walls_to_surface.py       Wall(...) y Bbox(...) → mallas 3D
   viz_total.py              visualización conjunta de nube, paredes y objetos
 docs/
