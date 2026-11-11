@@ -1,186 +1,198 @@
-#  3D Indoor Reconstruction Pipeline  
-### MASt3R-SLAM + SpatialLM + Herramientas Personalizadas (resize / painting / viz)
+# Reconstrucción 3D y detección de objetos en interiores
 
-Este repositorio integra un pipeline completo para reconstrucción 3D a partir de video en interiores, obteniendo:
+<p align="center"><img src="docs/portada.png" width="900" alt="De un video a una sala en 3D: paredes, puerta y objetos detectados"></p>
 
-- Una **nube de puntos densa** generada por **MASt3R-SLAM**  
-- Detección de **paredes, ventanas, puertas y estructura 3D** usando **SpatialLM**  
-- Post-procesamiento personalizado (rescale, coloreo, visualización final)  
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img src="https://img.shields.io/badge/PyTorch-2.1-EE4C2C?style=flat-square&logo=pytorch&logoColor=white">
+  <img src="https://img.shields.io/badge/Open3D-nubes_de_puntos-0EA5E9?style=flat-square">
+  <img src="https://img.shields.io/badge/SLAM3R-reconstrucci%C3%B3n-6366F1?style=flat-square">
+  <img src="https://img.shields.io/badge/SpatialLM-LLM_espacial-A855F7?style=flat-square">
+</p>
 
-Todo automatizado en `main.py`.
+<p align="center"><img src="docs/sala_3d.gif" width="760" alt="La sala reconstruida a partir de las detecciones de SpatialLM"></p>
+
+<p align="center">
+  <a href="docs/indoor_3d.mp4"><b>▶ Ver el video completo (61 s)</b></a> ·
+  <a href="paper_3d_indoor_detection.pdf">Artículo (PDF)</a>
+</p>
+
+Basta un video grabado con el celular recorriendo una habitación. El pipeline lo convierte en una **nube de puntos 3D**,
+la endereza y le pide a un **modelo de lenguaje espacial** que describa la sala: dónde están las paredes, la puerta y
+cada mueble, como cajas orientadas en 3D. Al final, esas detecciones se convierten en un plano arquitectónico que se
+puede recorrer.
+
+```
+video ──► SLAM3R ──► nube .ply ──► alineación PCA ──► SpatialLM ──► detections.txt ──► paredes 3D + visualización
+```
+
+La sala de la animación **no es una ilustración**: [`docs/video/exportar.py`](docs/video/exportar.py) lee la salida
+real de SpatialLM sobre nuestra habitación ([`docs/resultados/detections.txt`](docs/resultados/detections.txt)) y el
+video la dibuja en [Remotion](https://www.remotion.dev/) a partir de esas coordenadas.
 
 ---
 
-## 📁 Estructura del repositorio
+## 1. Del video a la nube de puntos (SLAM3R)
+
+<p align="center">
+  <img src="docs/resultados/01_video_entrada.jpg" width="420" alt="Fotograma del video de entrada">
+  <img src="docs/resultados/02_nube_slam3r.jpg" width="420" alt="Nube de puntos de SLAM3R">
+</p>
+
+[SLAM3R](https://github.com/PKU-VCL-3DV/SLAM3R) reconstruye la escena en tiempo real a partir de los fotogramas, sin
+necesidad de calibrar la cámara. [`src/recon.py`](src/recon.py) es una versión modificada de su `recon.py` que:
+
+- guarda la nube como `.ply` con Open3D (`o3d.io.write_point_cloud`),
+- desactiva la visualización interactiva y el cálculo de normales, que es costoso,
+- mantiene una resolución estable y expone los parámetros principales como opciones de línea de comandos.
+
+## 2. Enderezar la nube (alineación PCA)
+
+<p align="center"><img src="docs/resultados/03_nube_alineada_pca.jpg" width="560" alt="Nube alineada con PCA"></p>
+
+SLAM3R entrega la nube en el sistema de coordenadas de la primera cámara, así que el piso suele quedar inclinado.
+[`src/resize.py`](src/resize.py) la centra, calcula los ejes principales (PCA sobre la covarianza) y la rota para que
+el piso quede horizontal y el eje Z apunte hacia arriba, que es lo que espera SpatialLM.
+
+## 3. Describir la sala con un LLM espacial (SpatialLM)
+
+<p align="center"><img src="docs/deteccion.png" width="860" alt="Salida de SpatialLM"></p>
+
+[SpatialLM](https://github.com/manycore-research/SpatialLM) recibe la nube y responde con texto estructurado: una línea
+por pared, puerta u objeto. En nuestra sala detectó **11 paredes** (una de longitud cero), **1 puerta** y **8 objetos**:
 
 ```
-├── main.py
-├── requirements.txt
-│
-├── src/
-│   ├── resize.py
-│   ├── walls_to_surface.py
-│   └── viz_total.py 
-│   └── recon.py # Modificación archivo del modelo SLAM3R para que devuelva formato ply
-│
-│
-├── slam3r/                     # EL USUARIO DEBE CLONAR AQUÍ
-│   └── recon.py                # Debe ser reemplazado por la versión modificada
-│
-└── spatiallm/                  # EL USUARIO DEBE CLONAR AQUÍ
-    ├── run_inference.py
-    └── checkpoints/
+wall_0=Wall(x1, y1, z1, x2, y2, z2, alto, grosor)
+door_0=Door(wall_10, x, y, z, ancho, alto)
+bbox_2=Bbox(sofa, x, y, z, ángulo, ancho, fondo, alto)
 ```
+
+| Objeto | Clase | | Objeto | Clase |
+|---|---|---|---|---|
+| cuadro | `painting` | | mesa de centro | `coffee_table` |
+| decoración | `wall_decoration` | | armario | `cupboard` |
+| sofá | `sofa` | | lavamanos | `hand_sink` |
+| silla | `chair` | | espejo | `mirror` |
+
+<p align="center">
+  <img src="docs/resultados/04_detecciones_spatiallm.jpg" width="420" alt="Detecciones sobre la nube">
+  <img src="docs/resultados/07_vista_perspectiva.jpg" width="420" alt="Vista en perspectiva">
+</p>
+
+## 4. Paredes como plano arquitectónico
+
+<p align="center"><img src="docs/superficies.png" width="860" alt="Paredes reconstruidas como paneles 3D"></p>
+
+[`src/walls_to_surface.py`](src/walls_to_surface.py) convierte cada `Wall(...)` en un panel 3D con grosor y cada caja
+en una malla orientada; [`src/viz_total.py`](src/viz_total.py) junta la nube original, las paredes y los objetos en
+una sola escena.
+
+<p align="center">
+  <img src="docs/resultados/05_paredes_reconstruidas.jpg" width="420" alt="Paredes reconstruidas">
+  <img src="docs/resultados/06_visualizacion_final.jpg" width="420" alt="Visualización final">
+</p>
 
 ---
 
-## 🔧 Instalación
+## Métricas de SpatialLM
 
-### 1. Crear entorno, instalar dependencias y ejecutar pipeline
+<p align="center"><img src="docs/metricas.png" width="760" alt="F1 reportado por los autores de SpatialLM"></p>
 
-```
+> Estas cifras son las **publicadas por los autores de SpatialLM** en su benchmark, no una medición sobre nuestra
+> sala (no teníamos anotaciones de referencia para ella). Sirven para saber qué tan confiable es cada clase.
+
+**Estructura — F1 @ 0.25 IoU (2D)**
+
+| Clase | Llama-1B | Qwen-0.5B |
+|---|---|---|
+| wall | 68.9 | 68.2 |
+| door | 49.1 | 47.4 |
+| window | 47.0 | 51.4 |
+
+<details>
+<summary><b>Objetos — F1 @ 0.25 IoU (3D)</b></summary>
+
+| Clase | Llama-1B | Qwen-0.5B |
+|---|---|---|
+| bed | 96.8 | 95.2 |
+| sofa | 66.9 | 69.1 |
+| nightstand | 62.8 | 67.0 |
+| coffee table | 56.4 | 64.9 |
+| chandelier | 53.5 | 36.8 |
+| dresser | 46.7 | 46.7 |
+| dining table | 40.7 | 24.2 |
+| carpet | 40.3 | 24.1 |
+| curtain | 34.9 | 37.0 |
+| painting | 34.9 | 38.2 |
+| tv cabinet | 34.4 | 27.3 |
+| plants | 29.5 | 26.3 |
+| wardrobe | 29.4 | 39.6 |
+| chair | 20.8 | 32.3 |
+| stool | 17.6 | 30.8 |
+| air conditioner | 16.7 | 24.0 |
+| tv | 16.0 | 18.0 |
+| cabinet | 15.2 | 11.2 |
+| side table | 14.6 | 9.7 |
+| refrigerator | 0.0 | 16.7 |
+
+</details>
+
+Las paredes y los muebles grandes (cama, sofá, mesa de centro) se detectan bien; los objetos pequeños o planos
+(cuadros, sillas, mesas auxiliares) son los más difíciles.
+
+---
+
+## Cómo ejecutarlo
+
+Requiere GPU con CUDA (SpatialLM usa `spconv-cu118`).
+
+```bash
 conda create -n recon3d python=3.10 -y
 conda activate recon3d
 pip install -r requirements.txt
-python main.py
 
-```
+# los dos modelos se clonan dentro del repositorio
+git clone https://github.com/PKU-VCL-3DV/SLAM3R.git slam3r
+git clone https://github.com/manycore-research/SpatialLM.git spatiallm
+cp src/recon.py slam3r/recon.py        # versión modificada que exporta .ply
 
----
-
-## 📥 Clonar SLAM3R y SpatialLM dentro del repositorio
-
-### 1. Clonar SLAM3R:
-
-```
-git clone https://github.com/naver/mast3r-slam.git slam3r
-```
-
-### 2. Clonar SpatialLM:
-
-```
-git clone https://github.com/Yinjiayudong/SpatialLM.git spatiallm
-```
-
----
-
-## ⚠️ Modificación obligatoria de `slam3r/recon.py`
-
-Debe reemplazarse por la versión modificada incluida en este repositorio dentro de src/recon.py.
-
-### Cambios realizados en recon.py:
-
-1. Guardar la nube como `.ply` usando Open3D:
-```
-o3d.io.write_point_cloud(args.output, pcd)
-```
-2. Deshabilitar visualización interactiva.  
-3. Ajustes para mantener resolución estable compatible con `resize.py`.  
-4. Evitar cálculos costosos de normales.  
-5. Exponer parámetros esenciales como flags CLI.
-
----
-
-## ▶️ Ejecución del pipeline completo
-
-```
 python main.py --video ruta/del/video.mp4
 ```
 
-Salida esperada:
+Salida en `outputs/`: la nube de SLAM3R, la nube alineada, las detecciones de SpatialLM y la escena final.
 
-```
-outputs/
- ├── raw_slam3r.ply
- ├── resized.ply
- ├── detections.json
- └── colored_output.ply
-```
+Si SLAM3R deja una nube demasiado densa o ruidosa, su interfaz Gradio (`python slam3r/app.py`) permite ajustar la
+resolución, la densidad de puntos y el submuestreo antes de seguir con el resto del pipeline.
 
----
+Para regenerar el video y la portada:
 
-## Alternativa: Uso de Gradio (`app.py`) para generar la nube
-
-Si SLAM3R no produce buenos resultados (p. ej., demasiados puntos, ruido, mala densidad),  
-se puede usar **la aplicación Gradio incluida en SLAM3R**:
-
-```
-python slam3r/app.py
+```bash
+python docs/video/exportar.py          # lee docs/resultados/detections.txt → docs/video/src/datos.json
+cd docs/video
+npm install
+npx remotion studio                    # vista previa interactiva
+npx remotion render Indoor3D ../indoor_3d.mp4
+npx remotion still PortadaBanner ../portada.png
 ```
 
-Allí se puede ajustar:
-
-- Resolución
-- Densidad de puntos
-- Submuestreo
-- Parámetros para reducir carga computacional
-
-Esto ayuda a obtener una nube más ligera o más limpia.
-
----
-
-##  Diagrama del Pipeline
+## Estructura
 
 ```
- VIDEO → SLAM3R → raw.ply → resize.py → resized.ply → SpatialLM → detections.txt
-        → walls_to_surface.py → colored_output.ply → viz_total.py → visualización final
+main.py                     orquesta el pipeline completo
+src/
+  recon.py                  recon.py de SLAM3R modificado (exporta .ply, sin visor)
+  resize.py                 alineación PCA de la nube (Z hacia arriba)
+  walls_to_surface.py       Wall(...) y Bbox(...) → mallas 3D
+  viz_total.py              visualización conjunta de nube, paredes y objetos
+docs/
+  resultados/               figuras del artículo y salida real de SpatialLM (detections.txt)
+  video/                    proyecto Remotion del video y la portada
+paper_3d_indoor_detection.pdf
 ```
 
+## Créditos
 
+**Carlos Andrés Galán Pérez** — Visión computacional, Universidad del Rosario.
 
----
-
-## 📊 Metricas de evaluacion de SPATIALLM
-
-Basadas en los resultados oficiales:
-
-## 🧱 Layout — F1 @ 0.25 IoU (2D)
-
-| Objeto | Llama-1B | Qwen-0.5B |
-|--------|----------|-----------|
-| wall   | 68.9     | 68.2      |
-| door   | 49.1     | 47.4      |
-| window | 47.0     | 51.4      |
-
----
-
-## 🛋️ Objetos — F1 @ 0.25 IoU (3D/2D)
-
-| Objeto          | Llama-1B | Qwen-0.5B |
-|-----------------|----------|-----------|
-| curtain         | 34.9     | 37.0      |
-| nightstand      | 62.8     | 67.0      |
-| chandelier      | 53.5     | 36.8      |
-| wardrobe        | 29.4     | 39.6      |
-| bed             | 96.8     | 95.2      |
-| sofa            | 66.9     | 69.1      |
-| chair           | 20.8     | 32.3      |
-| cabinet         | 15.2     | 11.2      |
-| dining table    | 40.7     | 24.2      |
-| plants          | 29.5     | 26.3      |
-| tv cabinet      | 34.4     | 27.3      |
-| coffee table    | 56.4     | 64.9      |
-| side table      | 14.6     | 9.7       |
-| air conditioner | 16.7     | 24.0      |
-| dresser         | 46.7     | 46.7      |
-| stool           | 17.6     | 30.8      |
-| refrigerator    | 0.0      | 16.7      |
-| painting        | 34.9     | 38.2      |
-| carpet          | 40.3     | 24.1      |
-| tv              | 16.0     | 18.0      |
-
-## 📜 Licencias
-
-Este repositorio integra código perteneciente a:
-
-- SLAM3R
-- SpatialLM 
-
-Los derechos corresponden a sus autores originales.
-
----
-
-## Comentario final
-
-Este pipeline fue integrado y simplificado para ofrecer una experiencia completa de reconstrucción indoor 3D de extremo a extremo. Los resultados obtenidos se pueden visualizar en la siguiente presentación: https://www.canva.com/design/DAG5ZciTtM4/P0mjYXu9eZGRtm89qAWvcA/edit?utm_content=DAG5ZciTtM4&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton
-
+Este repositorio integra [SLAM3R](https://github.com/PKU-VCL-3DV/SLAM3R) y
+[SpatialLM](https://github.com/manycore-research/SpatialLM); los derechos de esos modelos corresponden a sus autores.

@@ -1,0 +1,7 @@
+docs/video/node_modules/
+docs/video/out/
+docs/video/build/
+__pycache__/
+outputs/
+slam3r/
+spatiallm/
